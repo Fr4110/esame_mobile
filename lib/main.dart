@@ -6,6 +6,7 @@ import 'package:local_auth/local_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:table_calendar/table_calendar.dart'; 
 import 'package:intl/date_symbol_data_local.dart'; 
+import 'package:flutter/services.dart';
 
 // Notificatore globale per il tema (Dark/Light)
 ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
@@ -24,10 +25,10 @@ class AgendaLegaleApp extends StatelessWidget {
       valueListenable: themeNotifier,
       builder: (_, ThemeMode currentMode, __) {
         return MaterialApp(
-          title: 'Agenda Legale',
+          title: 'JurisPlan',
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
-            primarySwatch: Colors.blue, 
+            colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF072c55)),
             useMaterial3: true, 
             brightness: Brightness.light
           ),
@@ -91,14 +92,14 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Agenda Legale - Accesso')),
+      appBar: AppBar(title: const Text('             JurisPlan - Accesso')),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             children: [
-              const Icon(Icons.gavel, size: 80, color: Colors.blue),
-              const SizedBox(height: 40),
+              Image.asset('assets/icona.png', height: 280, fit: BoxFit.contain,),
+              const SizedBox(height: 80),
               TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email))),
               const SizedBox(height: 20),
               TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock))),
@@ -107,7 +108,7 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   Expanded(child: ElevatedButton(onPressed: _effettuaLogin, style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)), child: const Text('ACCEDI'))),
                   const SizedBox(width: 10),
-                  IconButton(onPressed: _avviaBiometria, icon: const Icon(Icons.fingerprint, size: 40, color: Colors.blue)),
+                  IconButton(onPressed: _avviaBiometria, icon: const Icon(Icons.fingerprint, size: 40, color: Color(0xFF072C55))),
                 ],
               ),
               TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const RegistrationPage())), child: const Text('Registrati qui')),
@@ -339,7 +340,33 @@ class _AgendaPageState extends State<AgendaPage> {
     );
   }
 
-  Widget _rigaInfo(IconData icon, String testo) => Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(children: [Icon(icon, size: 20, color: Colors.blue), const SizedBox(width: 10), Text(testo)]));
+  // --- NUOVA FUNZIONE PER SOLA LETTURA NELLA RICERCA ---
+  void _mostraSoloDettagliEvento(EventoLegale evento, String data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Scheda Impegno (Sola Lettura)"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _rigaInfo(Icons.calendar_today, "Data: $data"),
+            _rigaInfo(Icons.person, "Cliente: ${evento.cliente}"),
+            _rigaInfo(Icons.gavel, "Fase: ${evento.fase}"),
+            _rigaInfo(Icons.access_time, "Ora: ${evento.ora}"),
+            _rigaInfo(Icons.place, "Luogo: ${evento.luogo}"),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Chiudi"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _rigaInfo(IconData icon, String testo) => Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(children: [Icon(icon, size: 20, color: Color(0xFF072C55)), const SizedBox(width: 10), Text(testo)]));
 
   void _apriDialogEvento({EventoLegale? eventoEsistente, int? index}) {
     final c = TextEditingController(text: eventoEsistente?.cliente);
@@ -470,8 +497,19 @@ class _AgendaPageState extends State<AgendaPage> {
                 decoration: const InputDecoration(hintText: "Cerca in tutta l'agenda...", hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
                 onChanged: (valore) => setState(() => _testoCercato = valore),
               )
-            : const Text('Agenda Legale'),
-        backgroundColor: _staCercando ? Colors.blue.shade700 : null,
+            : const Text('       Agenda Legale'),
+            // Ora la barra sarà SEMPRE del tuo blu scuro, sia in ricerca che normale
+            backgroundColor: const Color(0xFF072C55),
+            // Aggiungiamo questa riga per rendere bianchi il titolo e le icone (lente e burger)
+            systemOverlayStyle: SystemUiOverlayStyle.light, 
+
+  // 2. Forza il colore bianco per tutto ciò che è "sopra" la barra
+  foregroundColor: Colors.white, 
+
+  // 3. Sovrascrivi esplicitamente i temi delle icone
+  iconTheme: const IconThemeData(color: Colors.white),
+  actionsIconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
         actions: [
           IconButton(
             icon: Icon(_staCercando ? Icons.close : Icons.search),
@@ -488,12 +526,15 @@ class _AgendaPageState extends State<AgendaPage> {
         child: Column(
           children: [
             UserAccountsDrawerHeader(
+              decoration: const BoxDecoration(
+              color: Color(0xFF072C55), // Qui metti il tuo Blu Scuro (o il colore che vuoi)
+              ),
               currentAccountPicture: GestureDetector(
                 onTap: _mostraAnteprimaFoto,
                 child: CircleAvatar(
                   backgroundColor: Colors.white,
                   backgroundImage: _percorsoFoto != null ? FileImage(File(_percorsoFoto!)) : null,
-                  child: _percorsoFoto == null ? const Icon(Icons.camera_alt, color: Colors.blue) : null,
+                  child: _percorsoFoto == null ? const Icon(Icons.camera_alt, color: Color(0xFF072C55)) : null,
                 ),
               ),
               accountName: Text(_nomeUtente, style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -540,10 +581,10 @@ class _AgendaPageState extends State<AgendaPage> {
               },
               eventLoader: _getEventiPerGiorno,
               calendarStyle: const CalendarStyle(
-                markerDecoration: BoxDecoration(color: Colors.blue, shape: BoxShape.rectangle),
+                markerDecoration: BoxDecoration(color: Color(0xFF072C55), shape: BoxShape.rectangle),
                 markerSize: 5,
-                todayDecoration: BoxDecoration(color: Colors.blueAccent, shape: BoxShape.circle),
-                selectedDecoration: BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
+                todayDecoration: BoxDecoration(color: Color(0xFF072C55), shape: BoxShape.circle),
+                selectedDecoration: BoxDecoration(color: Color(0xFF072C55), shape: BoxShape.circle),
               ),
               headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
               calendarBuilders: CalendarBuilders(
@@ -553,7 +594,7 @@ class _AgendaPageState extends State<AgendaPage> {
                       bottom: 1,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.blue,
+                          color: Color(0xFF072C55),
                           borderRadius: BorderRadius.circular(2.0),
                         ),
                         width: 16.0,
@@ -574,7 +615,12 @@ class _AgendaPageState extends State<AgendaPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(onPressed: () => _apriDialogEvento(), child: const Icon(Icons.add)),
+      floatingActionButton: _staCercando 
+    ? null 
+    : FloatingActionButton(
+        onPressed: () => _apriDialogEvento(), 
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
@@ -601,7 +647,7 @@ class _AgendaPageState extends State<AgendaPage> {
               border: Border(left: BorderSide(color: _getColoreFase(ev.fase), width: 6)),
             ),
             child: ListTile(
-              onTap: () {},
+              onTap: () => _mostraSoloDettagliEvento(ev, dataFormattata),
               leading: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.calendar_month, color: Colors.grey)]),
               title: Text(ev.cliente, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Column(
