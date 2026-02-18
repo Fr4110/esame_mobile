@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
+import 'dart:io';
 import 'package:local_auth/local_auth.dart';
+import 'package:image_picker/image_picker.dart';
+
+// Notificatore globale per il tema (Dark/Light)
+ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
 void main() {
   runApp(const AgendaLegaleApp());
@@ -12,13 +17,25 @@ class AgendaLegaleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Agenda Legale',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        useMaterial3: true,
-      ),
-      home: const LoginPage(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (_, ThemeMode currentMode, __) {
+        return MaterialApp(
+          title: 'Agenda Legale',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            primarySwatch: Colors.blue, 
+            useMaterial3: true, 
+            brightness: Brightness.light
+          ),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark, 
+            primarySwatch: Colors.blue
+          ),
+          themeMode: currentMode,
+          home: const LoginPage(),
+        );
+      },
     );
   }
 }
@@ -35,74 +52,41 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _storage = const FlutterSecureStorage();
-  
-  // Istanza per la biometria
   final LocalAuthentication auth = LocalAuthentication();
 
-  // La logica dell'impronta viene attivata solo premendo il tasto manuale
   Future<void> _avviaBiometria() async {
     try {
+      String? emailSalvata = await _storage.read(key: 'email');
       bool autenticato = await auth.authenticate(
-        localizedReason: 'Autenticati per accedere all\'Agenda Legale',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: true,
-        ),
+        localizedReason: 'Autenticati per accedere',
+        options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
       );
 
-      if (autenticato && mounted) {
+      if (autenticato && mounted && emailSalvata != null) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const AgendaPage()),
+          MaterialPageRoute(builder: (context) => AgendaPage(userEmail: emailSalvata)),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Autenticazione biometrica non riuscita')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Errore biometria')));
     }
   }
 
   Future<void> _effettuaLogin() async {
-    final emailInserita = _emailController.text;
-    final passwordInserita = _passwordController.text;
-
+    final email = _emailController.text.trim();
+    final pass = _passwordController.text;
     final emailSalvata = await _storage.read(key: 'email');
-    final passwordSalvata = await _storage.read(key: 'password');
+    final passSalvata = await _storage.read(key: 'password_$email');
 
-    if (emailSalvata == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nessun utente trovato. Registrati prima!'), 
-          backgroundColor: Colors.orange
-        ),
-      );
-      return;
-    }
-
-    if (emailInserita == emailSalvata && passwordInserita == passwordSalvata) {
-      if (!mounted) return;
+    if (emailSalvata == email && pass == passSalvata) {
       Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const AgendaPage()),
+        context, 
+        MaterialPageRoute(builder: (context) => AgendaPage(userEmail: email))
       );
     } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Email o Password errati'), 
-          backgroundColor: Colors.red
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Credenziali errate'), backgroundColor: Colors.red));
     }
-  }
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
   }
 
   @override
@@ -113,62 +97,21 @@ class _LoginPageState extends State<LoginPage> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(Icons.gavel, size: 80, color: Colors.blue),
               const SizedBox(height: 40),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Email', 
-                  border: OutlineInputBorder(), 
-                  prefixIcon: Icon(Icons.email)
-                ),
-              ),
+              TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email))),
               const SizedBox(height: 20),
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Password', 
-                  border: OutlineInputBorder(), 
-                  prefixIcon: Icon(Icons.lock)
-                ),
-              ),
+              TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock))),
               const SizedBox(height: 30),
-              
               Row(
                 children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _effettuaLogin,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 50)
-                      ),
-                      child: const Text('ACCEDI', style: TextStyle(fontSize: 18)),
-                    ),
-                  ),
+                  Expanded(child: ElevatedButton(onPressed: _effettuaLogin, style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)), child: const Text('ACCEDI'))),
                   const SizedBox(width: 10),
-                  IconButton(
-                    onPressed: _avviaBiometria,
-                    icon: const Icon(Icons.fingerprint, size: 40, color: Colors.blue),
-                    tooltip: "Usa Biometria",
-                  ),
+                  IconButton(onPressed: _avviaBiometria, icon: const Icon(Icons.fingerprint, size: 40, color: Colors.blue)),
                 ],
               ),
-              
-              const SizedBox(height: 20),
-              TextButton(
-                onPressed: () {
-                  _emailController.clear();
-                  _passwordController.clear();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const RegistrationPage()),
-                  );
-                },
-                child: const Text('Non hai un account? Registrati qui'),
-              ),
+              TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const RegistrationPage())), child: const Text('Registrati qui')),
             ],
           ),
         ),
@@ -177,478 +120,236 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
-// --- 2. PAGINA DI REGISTRAZIONE ---
+// --- 2. PAGINA REGISTRAZIONE ---
 class RegistrationPage extends StatefulWidget {
   const RegistrationPage({super.key});
-
   @override
   State<RegistrationPage> createState() => _RegistrationPageState();
 }
 
 class _RegistrationPageState extends State<RegistrationPage> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  bool _useBiometrics = false;
+  final _nome = TextEditingController();
+  final _cognome = TextEditingController();
+  final _email = TextEditingController();
+  final _pass = TextEditingController();
+  final _conf = TextEditingController();
+  bool _bio = false;
   final _storage = const FlutterSecureStorage();
 
-  Future<void> _effettuaRegistrazione() async {
-    final email = _emailController.text;
-    final password = _passwordController.text;
-    final confirmPassword = _confirmPasswordController.text;
-
-    if (password != confirmPassword) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Le password non coincidono!'), backgroundColor: Colors.red),
-      );
+  _registra() async {
+    if (_nome.text.isEmpty || _cognome.text.isEmpty || _email.text.isEmpty || _pass.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Campi obbligatori!')));
       return;
     }
-
-    if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Compila tutti i campi'), backgroundColor: Colors.orange),
-      );
-      return;
-    }
-
+    String email = _email.text.trim();
+    await _storage.write(key: 'nome_$email', value: _nome.text);
+    await _storage.write(key: 'cognome_$email', value: _cognome.text);
     await _storage.write(key: 'email', value: email);
-    await _storage.write(key: 'password', value: password);
-    await _storage.write(key: 'use_biometrics', value: _useBiometrics.toString());
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Registrazione completata! Inserisci le credenziali per accedere.'), backgroundColor: Colors.green),
-    );
-
-    Navigator.pop(context); // Torna al Login (che sarà vuoto)
-  }
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
-    super.dispose();
+    await _storage.write(key: 'password_$email', value: _pass.text);
+    Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Nuovo Utente')),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            children: [
-              const Text('Crea il tuo profilo', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 30),
-              TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person_add)),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock_outline)),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _confirmPasswordController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Conferma Password', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
-              ),
-              const SizedBox(height: 30),
-              SwitchListTile(
-                title: const Text('Abilita Accesso Biometrico'),
-                subtitle: const Text('Usa impronta per i futuri accessi'),
-                secondary: const Icon(Icons.fingerprint, size: 30),
-                value: _useBiometrics,
-                onChanged: (bool value) {
-                  setState(() {
-                    _useBiometrics = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton(
-                onPressed: _effettuaRegistrazione,
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 50),
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('REGISTRATI', style: TextStyle(fontSize: 18)),
-              ),
-            ],
-          ),
+      appBar: AppBar(title: const Text('Registrazione')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            TextField(controller: _nome, decoration: const InputDecoration(labelText: 'Nome', prefixIcon: Icon(Icons.badge))),
+            TextField(controller: _cognome, decoration: const InputDecoration(labelText: 'Cognome', prefixIcon: Icon(Icons.badge_outlined))),
+            TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email))),
+            TextField(controller: _pass, obscureText: true, decoration: const InputDecoration(labelText: 'Password', prefixIcon: Icon(Icons.lock))),
+            TextField(controller: _conf, obscureText: true, decoration: const InputDecoration(labelText: 'Conferma', prefixIcon: Icon(Icons.lock_clock))),
+            SwitchListTile(title: const Text('Biometria'), value: _bio, onChanged: (v) => setState(() => _bio = v)),
+            const SizedBox(height: 20),
+            ElevatedButton(onPressed: _registra, child: const Text('REGISTRATI')),
+          ],
         ),
       ),
     );
   }
 }
 
-// --- 3. PAGINA AGENDA (Dinamica e Navigabile) ---
+// --- 3. AGENDA PAGE (Main Logic) ---
 class AgendaPage extends StatefulWidget {
-  const AgendaPage({super.key});
-
+  final String userEmail;
+  const AgendaPage({super.key, required this.userEmail});
   @override
   State<AgendaPage> createState() => _AgendaPageState();
 }
 
 class _AgendaPageState extends State<AgendaPage> {
+  // Variabili per la ricerca
+  bool _staCercando = false;
+  String _testoCercato = "";
+  final TextEditingController _searchController = TextEditingController();
+
   DateTime _giornoSelezionato = DateTime.now();
   final _storage = const FlutterSecureStorage();
-
-  // Ora la mappa non contiene semplici stringhe, ma oggetti "EventoLegale"
   Map<String, List<EventoLegale>> _impegni = {};
+  
+  // Dati utente
+  String _nomeUtente = "Avvocato";
+  String? _percorsoFoto;
+
+  String get _storageKey => 'agenda_dati_${widget.userEmail}';
 
   @override
   void initState() {
     super.initState();
-    _caricaImpegni(); // Appena apri la pagina, carichiamo i dati salvati
+    _caricaInfoUtente();
+    _caricaImpegni();
   }
 
-  // --- 1. SALVATAGGIO E CARICAMENTO ---
-  String _chiaveData(DateTime data) {
-    return "${data.year}-${data.month}-${data.day}";
-  }
-
-  Future<void> _salvaImpegni() async {
-    // Trasformiamo la mappa di oggetti in un testo JSON salvabile
-    // È un po' tecnico, ma serve a convertire "Oggetti" in "Testo"
-    final jsonMap = _impegni.map((key, value) => MapEntry(
-        key,
-        value.map((e) => e.toMap()).toList(),
-    ));
-    
-    String jsonString = jsonEncode(jsonMap);
-    await _storage.write(key: 'agenda_dati', value: jsonString);
-  }
-
-  Future<void> _caricaImpegni() async {
-    String? jsonString = await _storage.read(key: 'agenda_dati');
-    if (jsonString != null) {
-      try {
-        Map<String, dynamic> decodedMap = jsonDecode(jsonString);
-        setState(() {
-          _impegni = decodedMap.map((key, value) => MapEntry(
-            key,
-            (value as List).map((e) => EventoLegale.fromMap(e)).toList(),
-          ));
-        });
-      } catch (e) {
-        print("Errore nel caricamento dati: $e");
-      }
-    }
-  }
-
-  void _cambiaGiorno(int giorniDaAggiungere) {
+  _caricaInfoUtente() async {
+    String? n = await _storage.read(key: 'nome_${widget.userEmail}');
+    String? foto = await _storage.read(key: 'foto_${widget.userEmail}');
     setState(() {
-      _giornoSelezionato = _giornoSelezionato.add(Duration(days: giorniDaAggiungere));
+      _nomeUtente = n ?? "Avvocato";
+      _percorsoFoto = foto;
     });
   }
 
-  // --- 2. INTERFACCIA AGGIUNTA EVENTO (Multi-campo) ---
-  void _aggiungiEvento() {
-    // Controller per i 4 campi richiesti
-    final clienteController = TextEditingController();
-    final faseController = TextEditingController();
-    final oraController = TextEditingController();
-    final luogoController = TextEditingController();
+  _caricaImpegni() async {
+    String? data = await _storage.read(key: _storageKey);
+    if (data != null) {
+      Map<String, dynamic> decoded = jsonDecode(data);
+      setState(() {
+        _impegni = decoded.map((k, v) => MapEntry(k, (v as List).map((e) => EventoLegale.fromMap(e)).toList()));
+      });
+    }
+  }
 
+  _salvaImpegni() async {
+    final map = _impegni.map((k, v) => MapEntry(k, v.map((e) => e.toMap()).toList()));
+    await _storage.write(key: _storageKey, value: jsonEncode(map));
+  }
+
+  // GESTIONE FOTO: Anteprima e Permessi
+  void _mostraAnteprimaFoto() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Nuovo Impegno", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-  mainAxisSize: MainAxisSize.min,
-  children: [
-    TextField(
-      controller: clienteController,
-      decoration: const InputDecoration(
-        labelText: "Cliente", // Questo resta sempre
-        hintText: "es. Rossi", // Questo scompare quando scrivi
-        icon: Icon(Icons.person),
-      ),
-    ),
-    TextField(
-      controller: faseController,
-      decoration: const InputDecoration(
-        labelText: "Fase",
-        hintText: "es. Udienza",
-        icon: Icon(Icons.gavel),
-      ),
-    ),
-    TextField(
-      controller: oraController,
-      keyboardType: TextInputType.text,
-      decoration: const InputDecoration(
-        labelText: "Ora",
-        hintText: "es. 09:30",
-        icon: Icon(Icons.access_time),
-      ),
-    ),
-    TextField(
-      controller: luogoController,
-      decoration: const InputDecoration(
-        labelText: "Luogo",
-        hintText: "es. Trib. Milano",
-        icon: Icon(Icons.place),
-      ),
-    ),
-  ],
-),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Annulla"),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (clienteController.text.isNotEmpty) {
-                setState(() {
-                  String key = _chiaveData(_giornoSelezionato);
-                  if (_impegni[key] == null) {
-                    _impegni[key] = [];
-                  }
-                  
-                  // Creiamo il nuovo oggetto EventoLegale
-                  EventoLegale nuovoEvento = EventoLegale(
-                    cliente: clienteController.text,
-                    fase: faseController.text,
-                    ora: oraController.text,
-                    luogo: luogoController.text,
-                  );
-
-                  _impegni[key]!.add(nuovoEvento);
-                  _salvaImpegni(); // Salviamo subito dopo l'aggiunta!
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Salva"),
-          ),
-        ],
-      ),
-    );
-  }
-  // --- NUOVA FUNZIONE PER MODIFICARE ---
-void _modificaEvento(EventoLegale evento, int index) {
-  final clienteController = TextEditingController(text: evento.cliente);
-  final faseController = TextEditingController(text: evento.fase);
-  final oraController = TextEditingController(text: evento.ora);
-  final luogoController = TextEditingController(text: evento.luogo);
-
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text("Modifica Impegno"),
-      content: SingleChildScrollView(
-        child: Column(
+        contentPadding: EdgeInsets.zero,
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: clienteController, decoration: const InputDecoration(labelText: "Cliente")),
-            TextField(controller: faseController, decoration: const InputDecoration(labelText: "Fase")),
-            TextField(
-              controller: oraController,
-              readOnly: true, // Come abbiamo impostato per l'orologio
-              onTap: () async {
-                TimeOfDay? pickedTime = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-                if (pickedTime != null) {
-                  setState(() { oraController.text = pickedTime.format(context); });
-                }
-              },
-              decoration: const InputDecoration(labelText: "Ora"),
+            _percorsoFoto != null
+                ? Image.file(File(_percorsoFoto!), fit: BoxFit.cover, height: 250, width: double.infinity)
+                : Container(height: 200, width: double.infinity, color: Colors.grey, child: const Icon(Icons.person, size: 100)),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: ElevatedButton.icon(
+                onPressed: () { Navigator.pop(context); _prendiFoto(); },
+                icon: const Icon(Icons.edit),
+                label: const Text("Modifica Foto"),
+              ),
             ),
-            TextField(controller: luogoController, decoration: const InputDecoration(labelText: "Luogo")),
           ],
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annulla")),
-        ElevatedButton(
-          onPressed: () {
-            setState(() {
-              // Aggiorniamo l'oggetto esistente
-              evento.cliente = clienteController.text;
-              evento.fase = faseController.text;
-              evento.ora = oraController.text;
-              evento.luogo = luogoController.text;
-              _salvaImpegni(); // Salviamo la modifica
-            });
-            Navigator.pop(context);
-          },
-          child: const Text("Aggiorna"),
-        ),
-      ],
-    ),
-  );
-}
-
-  // --- 3. CONFERMA ELIMINAZIONE ---
-  void _confermaElimina(List<EventoLegale> listaGiornaliera, int index) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Eliminare l'evento?"),
-        content: const Text("Questa azione non può essere annullata."),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context), // Chiudi senza fare nulla
-            child: const Text("No, mantieni"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () {
-              setState(() {
-                listaGiornaliera.removeAt(index);
-                _salvaImpegni(); // Aggiorniamo il salvataggio
-              });
-              Navigator.pop(context); // Chiudi il dialog
-            },
-            child: const Text("Sì, elimina"),
-          ),
-        ],
-      ),
     );
   }
 
-  void _logout(BuildContext context) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-    );
+  Future<void> _prendiFoto() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+      if (image != null) {
+        await _storage.write(key: 'foto_${widget.userEmail}', value: image.path);
+        setState(() => _percorsoFoto = image.path);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Errore accesso galleria")));
+    }
   }
 
+  // GESTIONE EVENTI: Dialog e Logica
   void _mostraDettagliEvento(EventoLegale evento, int index) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Dettagli Impegno", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text("Dettagli Impegno"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _rigaDettaglio(Icons.person, "Cliente", evento.cliente),
-            const SizedBox(height: 10),
-            _rigaDettaglio(Icons.gavel, "Fase", evento.fase),
-            const SizedBox(height: 10),
-            _rigaDettaglio(Icons.access_time, "Ora", evento.ora),
-            const SizedBox(height: 10),
-            _rigaDettaglio(Icons.place, "Luogo", evento.luogo),
+            _rigaInfo(Icons.person, "Cliente: ${evento.cliente}"),
+            _rigaInfo(Icons.gavel, "Fase: ${evento.fase}"),
+            _rigaInfo(Icons.access_time, "Ora: ${evento.ora}"),
+            _rigaInfo(Icons.place, "Luogo: ${evento.luogo}"),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Chiudi"),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.edit, size: 18),
-            label: const Text("Modifica"),
-            onPressed: () {
-              Navigator.pop(context); // Chiude i dettagli
-              _apriDialogEvento(eventoEsistente: evento, index: index); // Apre l'editor
-            },
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Chiudi")),
+          ElevatedButton(onPressed: () { Navigator.pop(context); _apriDialogEvento(eventoEsistente: evento, index: index); }, child: const Text("Modifica")),
         ],
       ),
     );
   }
 
-  // Funzione di supporto grafica per i dettagli
-  Widget _rigaDettaglio(IconData icona, String etichetta, String valore) {
-    return Row(
-      children: [
-        Icon(icona, color: Colors.blue, size: 20),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            "$etichetta: $valore",
-            style: const TextStyle(fontSize: 16),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _rigaInfo(IconData icon, String testo) => Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(children: [Icon(icon, size: 20, color: Colors.blue), const SizedBox(width: 10), Text(testo)]));
 
-  // 1. Funzione per Aprire il Dialog (sia per Aggiungere che per Modificare)
   void _apriDialogEvento({EventoLegale? eventoEsistente, int? index}) {
-    // Se passiamo un evento esistente, i campi saranno già compilati
-    final clienteController = TextEditingController(text: eventoEsistente?.cliente);
-    final faseController = TextEditingController(text: eventoEsistente?.fase);
-    final oraController = TextEditingController(text: eventoEsistente?.ora);
-    final luogoController = TextEditingController(text: eventoEsistente?.luogo);
+    final c = TextEditingController(text: eventoEsistente?.cliente);
+    final f = TextEditingController(text: eventoEsistente?.fase);
+    final o = TextEditingController(text: eventoEsistente?.ora);
+    final l = TextEditingController(text: eventoEsistente?.luogo);
 
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text(eventoEsistente == null ? "Nuovo Impegno" : "Modifica Impegno"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: clienteController, 
-                decoration: const InputDecoration(labelText: "Cliente", hintText: "es. Rossi")
-              ),
-              TextField(
-                controller: faseController, 
-                decoration: const InputDecoration(labelText: "Fase", hintText: "es. Udienza")
-              ),
-              TextField(
-                controller: oraController,
-                readOnly: true,
-                onTap: () async {
-                  TimeOfDay? picked = await showTimePicker(
-                    context: context, 
-                    initialTime: TimeOfDay.now()
-                  );
-                  if (picked != null) {
-                    setState(() => oraController.text = picked.format(context));
-                  }
-                },
-                decoration: const InputDecoration(labelText: "Ora", hintText: "Seleziona orario"),
-              ),
-              TextField(
-                controller: luogoController, 
-                decoration: const InputDecoration(labelText: "Luogo", hintText: "es. Trib. Milano")
-              ),
-            ],
+        title: Text(eventoEsistente == null ? "Nuovo Impegno" : "Modifica"),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: c, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: "Cliente", icon: Icon(Icons.person))),
+                TextField(controller: f, decoration: const InputDecoration(labelText: "Fase", icon: Icon(Icons.gavel))),
+                TextField(controller: o, readOnly: true, decoration: const InputDecoration(labelText: "Ora", icon: Icon(Icons.access_time)), onTap: () async {
+                  TimeOfDay? p = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+                  if (p != null) setState(() => o.text = p.format(context));
+                }),
+                TextField(controller: l, decoration: const InputDecoration(labelText: "Luogo", icon: Icon(Icons.place))),
+              ],
+            ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annulla")),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                String key = _chiaveData(_giornoSelezionato);
-                EventoLegale nuovo = EventoLegale(
-                  cliente: clienteController.text,
-                  fase: faseController.text,
-                  ora: oraController.text,
-                  luogo: luogoController.text,
-                );
+          TextButton(onPressed: () { FocusScope.of(context).unfocus(); Navigator.pop(context); }, child: const Text("Annulla")),
+          ElevatedButton(onPressed: () {
+            if (c.text.isEmpty) return;
+            FocusScope.of(context).unfocus();
+            setState(() {
+              String key = "${_giornoSelezionato.year}-${_giornoSelezionato.month}-${_giornoSelezionato.day}";
+              EventoLegale ev = EventoLegale(cliente: c.text.trim(), fase: f.text.trim(), ora: o.text, luogo: l.text.trim());
+              if (eventoEsistente == null) { _impegni.putIfAbsent(key, () => []).add(ev); }
+              else { _impegni[key]![index!] = ev; }
+              _salvaImpegni();
+            });
+            Navigator.pop(context);
+          }, child: const Text("Salva")),
+        ],
+      ),
+    );
+  }
 
-                if (eventoEsistente == null) {
-                  // Aggiunta nuovo
-                  if (_impegni[key] == null) _impegni[key] = [];
-                  _impegni[key]!.add(nuovo);
-                } else {
-                  // Modifica esistente
-                  _impegni[key]![index!] = nuovo;
-                }
-                _salvaImpegni(); // Salva su disco
-              });
-              Navigator.pop(context);
-            },
-            child: Text(eventoEsistente == null ? "Salva" : "Aggiorna"),
-          ),
+  void _confermaEliminaAttivita(List<EventoLegale> lista, int index) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Eliminare?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("No")),
+          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red), onPressed: () {
+            setState(() { lista.removeAt(index); _salvaImpegni(); });
+            Navigator.pop(context);
+          }, child: const Text("Sì", style: TextStyle(color: Colors.white))),
         ],
       ),
     );
@@ -656,133 +357,122 @@ void _modificaEvento(EventoLegale evento, int index) {
 
   @override
   Widget build(BuildContext context) {
-    final impegniDelGiorno = _impegni[_chiaveData(_giornoSelezionato)] ?? [];
+    final String chiaveGiorno = "${_giornoSelezionato.year}-${_giornoSelezionato.month}-${_giornoSelezionato.day}";
+    final List<EventoLegale> impegniGiorno = _impegni[chiaveGiorno] ?? [];
+
+    final impegniFiltrati = impegniGiorno.where((evento) {
+      if (!_staCercando) return true;
+      final query = _testoCercato.toLowerCase();
+      return evento.cliente.toLowerCase().contains(query) || evento.fase.toLowerCase().contains(query) || evento.luogo.toLowerCase().contains(query);
+    }).toList();
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        title: const Text('Agenda Legale'),
+        title: _staCercando
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(hintText: "Cerca...", hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
+                onChanged: (val) => setState(() => _testoCercato = val),
+              )
+            : const Text('Agenda Legale'),
+        backgroundColor: _staCercando ? Colors.blue.shade700 : null,
         actions: [
           IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            onPressed: () => _logout(context),
-          )
+            icon: Icon(_staCercando ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _staCercando = !_staCercando;
+                if (!_staCercando) { _testoCercato = ""; _searchController.clear(); }
+              });
+            },
+          ),
         ],
+      ),
+      drawer: Drawer(
+        child: Column(
+          children: [
+            UserAccountsDrawerHeader(
+              currentAccountPicture: GestureDetector(
+                onTap: _mostraAnteprimaFoto,
+                child: CircleAvatar(
+                  backgroundColor: Colors.white,
+                  backgroundImage: _percorsoFoto != null ? FileImage(File(_percorsoFoto!)) : null,
+                  child: _percorsoFoto == null ? const Icon(Icons.camera_alt, color: Colors.blue) : null,
+                ),
+              ),
+              accountName: Text(_nomeUtente, style: const TextStyle(fontWeight: FontWeight.bold)),
+              accountEmail: Text(widget.userEmail),
+            ),
+            ExpansionTile(
+              leading: const Icon(Icons.settings),
+              title: const Text("Impostazioni"),
+              children: [
+                SwitchListTile(
+                  title: const Text("Dark Mode"),
+                  secondary: const Icon(Icons.dark_mode),
+                  value: themeNotifier.value == ThemeMode.dark,
+                  onChanged: (val) => setState(() => themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light),
+                ),
+              ],
+            ),
+            const Spacer(),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text("Esci", style: TextStyle(color: Colors.red)),
+              onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (c) => const LoginPage())),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
       body: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            color: Colors.blue.shade50,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                IconButton(icon: const Icon(Icons.arrow_back_ios), onPressed: () => _cambiaGiorno(-1)),
-                Column(
-                  children: [
-                    Text("${_giornoSelezionato.day}/${_giornoSelezionato.month}/${_giornoSelezionato.year}",
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                    Text("${impegniDelGiorno.length} Impegni", style: const TextStyle(color: Colors.grey)),
-                  ],
-                ),
-                IconButton(icon: const Icon(Icons.arrow_forward_ios), onPressed: () => _cambiaGiorno(1)),
-              ],
+          if (!_staCercando)
+            CalendarDatePicker(
+              initialDate: _giornoSelezionato,
+              firstDate: DateTime(2024),
+              lastDate: DateTime(2030),
+              onDateChanged: (d) => setState(() => _giornoSelezionato = d),
             ),
-          ),
           const Divider(height: 1),
           Expanded(
-            child: impegniDelGiorno.isEmpty
-                ? const Center(child: Text("Nessun impegno.\nPremi + per aggiungere.", textAlign: TextAlign.center))
+            child: impegniFiltrati.isEmpty
+                ? Center(child: Text(_testoCercato.isEmpty ? "Nessun impegno." : "Nessun risultato."))
                 : ListView.builder(
-          itemCount: impegniDelGiorno.length,
-          itemBuilder: (context, index) {
-            final evento = impegniDelGiorno[index];
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              elevation: 3,
-              child: ListTile(
-                onTap: () => _mostraDettagliEvento(evento, index),
-                leading: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.access_time, color: Colors.blue, size: 20),
-                    Text(
-                      evento.ora,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                title: Text(
-                  evento.cliente,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Fase: ${evento.fase}",
-                      style: const TextStyle(color: Colors.black87),
-                    ),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on, size: 14, color: Colors.grey),
-                        Text(
-                          " ${evento.luogo}",
-                          style: const TextStyle(color: Colors.grey),
+                    itemCount: impegniFiltrati.length,
+                    itemBuilder: (context, index) {
+                      final ev = impegniFiltrati[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        child: ListTile(
+                          onTap: () => _mostraDettagliEvento(ev, index),
+                          leading: Text(ev.ora, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          title: Text(ev.cliente),
+                          subtitle: Text(ev.fase),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            onPressed: () => _confermaEliminaAttivita(impegniGiorno, index),
+                          ),
                         ),
-                      ],
-                    ),
-                  ],
-                ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
-                  onPressed: () => _confermaElimina(impegniDelGiorno, index),
-                ),
-              ),
-            );
-          },
-        ),
-),
+                      );
+                    },
+                  ),
+          ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _aggiungiEvento,
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: FloatingActionButton(onPressed: () => _apriDialogEvento(), child: const Icon(Icons.add)),
     );
   }
 }
 
-// --- NUOVA CLASSE MODELLO (Da mettere alla fine del file) ---
+// --- CLASSE MODELLO ---
 class EventoLegale {
-  String cliente;
-  String fase;
-  String ora;
-  String luogo;
-
-  EventoLegale({
-    required this.cliente,
-    required this.fase,
-    required this.ora,
-    required this.luogo,
-  });
-
-  // Metodo per convertire l'oggetto in una mappa (per salvarlo in JSON)
-  Map<String, dynamic> toMap() {
-    return {
-      'cliente': cliente,
-      'fase': fase,
-      'ora': ora,
-      'luogo': luogo,
-    };
-  }
-
-  // Metodo per creare l'oggetto partendo dai dati salvati
-  factory EventoLegale.fromMap(Map<String, dynamic> map) {
-    return EventoLegale(
-      cliente: map['cliente'] ?? '',
-      fase: map['fase'] ?? '',
-      ora: map['ora'] ?? '',
-      luogo: map['luogo'] ?? '',
-    );
-  }
+  String cliente, fase, ora, luogo;
+  EventoLegale({required this.cliente, required this.fase, required this.ora, required this.luogo});
+  Map<String, dynamic> toMap() => {'cliente': cliente, 'fase': fase, 'ora': ora, 'luogo': luogo};
+  factory EventoLegale.fromMap(Map<String, dynamic> map) => EventoLegale(cliente: map['cliente'], fase: map['fase'], ora: map['ora'], luogo: map['luogo']);
 }
