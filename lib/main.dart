@@ -4,12 +4,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:local_auth/local_auth.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:table_calendar/table_calendar.dart'; 
+import 'package:intl/date_symbol_data_local.dart'; 
 
 // Notificatore globale per il tema (Dark/Light)
 ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
 void main() {
-  runApp(const AgendaLegaleApp());
+  // Inizializza la formattazione date per l'italiano e poi avvia l'app
+  initializeDateFormatting().then((_) => runApp(const AgendaLegaleApp()));
 }
 
 class AgendaLegaleApp extends StatelessWidget {
@@ -43,7 +46,6 @@ class AgendaLegaleApp extends StatelessWidget {
 // --- 1. PAGINA DI LOGIN ---
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
-
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
@@ -80,10 +82,7 @@ class _LoginPageState extends State<LoginPage> {
     final passSalvata = await _storage.read(key: 'password_$email');
 
     if (emailSalvata == email && pass == passSalvata) {
-      Navigator.pushReplacement(
-        context, 
-        MaterialPageRoute(builder: (context) => AgendaPage(userEmail: email))
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => AgendaPage(userEmail: email)));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Credenziali errate'), backgroundColor: Colors.red));
     }
@@ -172,7 +171,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
   }
 }
 
-// --- 3. AGENDA PAGE (Main Logic) ---
+// --- 3. AGENDA PAGE ---
 class AgendaPage extends StatefulWidget {
   final String userEmail;
   const AgendaPage({super.key, required this.userEmail});
@@ -187,6 +186,7 @@ class _AgendaPageState extends State<AgendaPage> {
   final TextEditingController _searchController = TextEditingController();
 
   DateTime _giornoSelezionato = DateTime.now();
+  DateTime _focusedDay = DateTime.now();
   final _storage = const FlutterSecureStorage();
   Map<String, List<EventoLegale>> _impegni = {};
   
@@ -196,11 +196,38 @@ class _AgendaPageState extends State<AgendaPage> {
 
   String get _storageKey => 'agenda_dati_${widget.userEmail}';
 
+  // ELENCO FASI (Esattamente come richieste)
+  final List<String> _elencoFasi = [
+    "Introduttiva",
+    "Istruttoria",
+    "Decisionale",
+    "Riesame",
+    "Decisione Appello",
+    "Ricorso",
+    "Controricorso",
+    "Decisione della Corte"
+  ];
+
   @override
   void initState() {
     super.initState();
     _caricaInfoUtente();
     _caricaImpegni();
+  }
+
+  // --- NUOVA FUNZIONE: GESTIONE COLORI ARCOBALENO ---
+  Color _getColoreFase(String fase) {
+    switch (fase) {
+      case "Introduttiva": return Colors.white; // Bianco
+      case "Istruttoria": return Colors.red;    // Rosso
+      case "Decisionale": return Colors.orange; // Arancione
+      case "Riesame": return Colors.yellow;     // Giallo
+      case "Decisione Appello": return Colors.green; // Verde
+      case "Ricorso": return Colors.blue;       // Blu
+      case "Controricorso": return Colors.indigo; // Indaco
+      case "Decisione della Corte": return Colors.purple; // Viola
+      default: return Colors.grey; // Default se non trova
+    }
   }
 
   _caricaInfoUtente() async {
@@ -227,7 +254,12 @@ class _AgendaPageState extends State<AgendaPage> {
     await _storage.write(key: _storageKey, value: jsonEncode(map));
   }
 
-  // GESTIONE FOTO: Anteprima e Permessi
+  List<EventoLegale> _getEventiPerGiorno(DateTime day) {
+    final String key = "${day.year}-${day.month}-${day.day}";
+    return _impegni[key] ?? [];
+  }
+
+  // GESTIONE FOTO
   void _mostraAnteprimaFoto() {
     showDialog(
       context: context,
@@ -241,16 +273,34 @@ class _AgendaPageState extends State<AgendaPage> {
                 : Container(height: 200, width: double.infinity, color: Colors.grey, child: const Icon(Icons.person, size: 100)),
             Padding(
               padding: const EdgeInsets.all(8.0),
-              child: ElevatedButton.icon(
-                onPressed: () { Navigator.pop(context); _prendiFoto(); },
-                icon: const Icon(Icons.edit),
-                label: const Text("Modifica Foto"),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () { Navigator.pop(context); _prendiFoto(); },
+                    icon: const Icon(Icons.edit),
+                    label: const Text("Modifica"),
+                  ),
+                  if (_percorsoFoto != null)
+                     ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () => _eliminaFoto(),
+                      icon: const Icon(Icons.delete, color: Colors.white),
+                      label: const Text("Elimina", style: TextStyle(color: Colors.white)),
+                    ),
+                ],
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _eliminaFoto() async {
+    Navigator.pop(context);
+    await _storage.delete(key: 'foto_${widget.userEmail}');
+    setState(() => _percorsoFoto = null);
   }
 
   Future<void> _prendiFoto() async {
@@ -293,48 +343,81 @@ class _AgendaPageState extends State<AgendaPage> {
 
   void _apriDialogEvento({EventoLegale? eventoEsistente, int? index}) {
     final c = TextEditingController(text: eventoEsistente?.cliente);
-    final f = TextEditingController(text: eventoEsistente?.fase);
     final o = TextEditingController(text: eventoEsistente?.ora);
     final l = TextEditingController(text: eventoEsistente?.luogo);
+    
+    String? faseSelezionata = eventoEsistente?.fase;
+    if (faseSelezionata != null && !_elencoFasi.contains(faseSelezionata)) {
+      faseSelezionata = null;
+    }
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(eventoEsistente == null ? "Nuovo Impegno" : "Modifica"),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: c, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: "Cliente", icon: Icon(Icons.person))),
-                TextField(controller: f, decoration: const InputDecoration(labelText: "Fase", icon: Icon(Icons.gavel))),
-                TextField(controller: o, readOnly: true, decoration: const InputDecoration(labelText: "Ora", icon: Icon(Icons.access_time)), onTap: () async {
-                  TimeOfDay? p = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-                  if (p != null) setState(() => o.text = p.format(context));
-                }),
-                TextField(controller: l, decoration: const InputDecoration(labelText: "Luogo", icon: Icon(Icons.place))),
-              ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(eventoEsistente == null ? "Nuovo Impegno" : "Modifica"),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(controller: c, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: "Cliente", icon: Icon(Icons.person))),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      value: faseSelezionata,
+                      decoration: const InputDecoration(labelText: "Fase", icon: Icon(Icons.gavel)),
+                      items: _elencoFasi.map((String fase) {
+                        return DropdownMenuItem<String>(
+                          value: fase,
+                          child: Text(fase, style: const TextStyle(fontSize: 14)),
+                        );
+                      }).toList(),
+                      onChanged: (String? nuovoValore) {
+                        setDialogState(() {
+                          faseSelezionata = nuovoValore;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(controller: o, readOnly: true, decoration: const InputDecoration(labelText: "Ora", icon: Icon(Icons.access_time)), onTap: () async {
+                      TimeOfDay? p = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+                      if (p != null) setDialogState(() => o.text = p.format(context));
+                    }),
+                    TextField(controller: l, decoration: const InputDecoration(labelText: "Luogo", icon: Icon(Icons.place))),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () { FocusScope.of(context).unfocus(); Navigator.pop(context); }, child: const Text("Annulla")),
-          ElevatedButton(onPressed: () {
-            if (c.text.isEmpty) return;
-            FocusScope.of(context).unfocus();
-            setState(() {
-              String key = "${_giornoSelezionato.year}-${_giornoSelezionato.month}-${_giornoSelezionato.day}";
-              EventoLegale ev = EventoLegale(cliente: c.text.trim(), fase: f.text.trim(), ora: o.text, luogo: l.text.trim());
-              if (eventoEsistente == null) { _impegni.putIfAbsent(key, () => []).add(ev); }
-              else { _impegni[key]![index!] = ev; }
-              _salvaImpegni();
-            });
-            Navigator.pop(context);
-          }, child: const Text("Salva")),
-        ],
+            actions: [
+              TextButton(onPressed: () { FocusScope.of(context).unfocus(); Navigator.pop(context); }, child: const Text("Annulla")),
+              ElevatedButton(onPressed: () {
+                if (c.text.isEmpty || faseSelezionata == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cliente e Fase sono obbligatori")));
+                  return;
+                }
+                FocusScope.of(context).unfocus();
+                
+                this.setState(() {
+                  String key = "${_giornoSelezionato.year}-${_giornoSelezionato.month}-${_giornoSelezionato.day}";
+                  EventoLegale ev = EventoLegale(
+                    cliente: c.text.trim(), 
+                    fase: faseSelezionata!, 
+                    ora: o.text, 
+                    luogo: l.text.trim()
+                  );
+                  if (eventoEsistente == null) { _impegni.putIfAbsent(key, () => []).add(ev); }
+                  else { _impegni[key]![index!] = ev; }
+                  _salvaImpegni();
+                });
+                Navigator.pop(context);
+              }, child: const Text("Salva")),
+            ],
+          );
+        }
       ),
     );
   }
@@ -357,14 +440,24 @@ class _AgendaPageState extends State<AgendaPage> {
 
   @override
   Widget build(BuildContext context) {
+    List<Map<String, dynamic>> risultatiGlobali = [];
+
+    if (_staCercando && _testoCercato.isNotEmpty) {
+      final query = _testoCercato.toLowerCase();
+      _impegni.forEach((dataKey, listaEventi) {
+        for (var evento in listaEventi) {
+          if (evento.cliente.toLowerCase().contains(query) ||
+              evento.fase.toLowerCase().contains(query) ||
+              evento.luogo.toLowerCase().contains(query)) {
+            risultatiGlobali.add({'evento': evento, 'data': dataKey});
+          }
+        }
+      });
+      risultatiGlobali.sort((a, b) => a['data'].compareTo(b['data']));
+    }
+
     final String chiaveGiorno = "${_giornoSelezionato.year}-${_giornoSelezionato.month}-${_giornoSelezionato.day}";
     final List<EventoLegale> impegniGiorno = _impegni[chiaveGiorno] ?? [];
-
-    final impegniFiltrati = impegniGiorno.where((evento) {
-      if (!_staCercando) return true;
-      final query = _testoCercato.toLowerCase();
-      return evento.cliente.toLowerCase().contains(query) || evento.fase.toLowerCase().contains(query) || evento.luogo.toLowerCase().contains(query);
-    }).toList();
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -374,8 +467,8 @@ class _AgendaPageState extends State<AgendaPage> {
                 controller: _searchController,
                 autofocus: true,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(hintText: "Cerca...", hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
-                onChanged: (val) => setState(() => _testoCercato = val),
+                decoration: const InputDecoration(hintText: "Cerca in tutta l'agenda...", hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
+                onChanged: (valore) => setState(() => _testoCercato = valore),
               )
             : const Text('Agenda Legale'),
         backgroundColor: _staCercando ? Colors.blue.shade700 : null,
@@ -431,45 +524,133 @@ class _AgendaPageState extends State<AgendaPage> {
       ),
       body: Column(
         children: [
-          if (!_staCercando)
-            CalendarDatePicker(
-              initialDate: _giornoSelezionato,
-              firstDate: DateTime(2024),
-              lastDate: DateTime(2030),
-              onDateChanged: (d) => setState(() => _giornoSelezionato = d),
-            ),
-          const Divider(height: 1),
-          Expanded(
-            child: impegniFiltrati.isEmpty
-                ? Center(child: Text(_testoCercato.isEmpty ? "Nessun impegno." : "Nessun risultato."))
-                : ListView.builder(
-                    itemCount: impegniFiltrati.length,
-                    itemBuilder: (context, index) {
-                      final ev = impegniFiltrati[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        child: ListTile(
-                          onTap: () => _mostraDettagliEvento(ev, index),
-                          leading: Text(ev.ora, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          title: Text(ev.cliente),
-                          subtitle: Text(ev.fase),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red),
-                            onPressed: () => _confermaEliminaAttivita(impegniGiorno, index),
-                          ),
+          if (!_staCercando) ...[
+            TableCalendar(
+              locale: 'it_IT',
+              firstDay: DateTime(2020),
+              lastDay: DateTime(2030),
+              focusedDay: _giornoSelezionato,
+              currentDay: DateTime.now(),
+              selectedDayPredicate: (day) => isSameDay(_giornoSelezionato, day),
+              onDaySelected: (selectedDay, focusedDay) {
+                setState(() {
+                  _giornoSelezionato = selectedDay;
+                  _focusedDay = focusedDay;
+                });
+              },
+              eventLoader: _getEventiPerGiorno,
+              calendarStyle: const CalendarStyle(
+                markerDecoration: BoxDecoration(color: Colors.blue, shape: BoxShape.rectangle),
+                markerSize: 5,
+                todayDecoration: BoxDecoration(color: Colors.blueAccent, shape: BoxShape.circle),
+                selectedDecoration: BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
+              ),
+              headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+              calendarBuilders: CalendarBuilders(
+                markerBuilder: (context, day, events) {
+                  if (events.isNotEmpty) {
+                    return Positioned(
+                      bottom: 1,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.blue,
+                          borderRadius: BorderRadius.circular(2.0),
                         ),
-                      );
-                    },
-                  ),
+                        width: 16.0,
+                        height: 3.0,
+                      ),
+                    );
+                  }
+                  return null;
+                },
+              ),
+            ),
+            const Divider(height: 1),
+          ],
+          Expanded(
+            child: _staCercando
+                ? _buildListaRicerca(risultatiGlobali)
+                : _buildListaGiorno(impegniGiorno),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(onPressed: () => _apriDialogEvento(), child: const Icon(Icons.add)),
     );
   }
+
+  Widget _buildListaRicerca(List<Map<String, dynamic>> risultati) {
+    if (_testoCercato.isEmpty) {
+      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.search, size: 60, color: Colors.grey), SizedBox(height: 10), Text("Digita per cercare", style: TextStyle(color: Colors.grey))]));
+    }
+    if (risultati.isEmpty) {
+      return Center(child: Text("Nessun risultato per '$_testoCercato'"));
+    }
+    return ListView.builder(
+      itemCount: risultati.length,
+      itemBuilder: (context, index) {
+        final EventoLegale ev = risultati[index]['evento'];
+        final String dataRaw = risultati[index]['data'];
+        final partiData = dataRaw.split('-');
+        String dataFormattata = dataRaw;
+        if(partiData.length == 3) dataFormattata = "${partiData[2]}/${partiData[1]}/${partiData[0]}";
+
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: _getColoreFase(ev.fase), width: 6)),
+            ),
+            child: ListTile(
+              onTap: () {},
+              leading: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.calendar_month, color: Colors.grey)]),
+              title: Text(ev.cliente, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("${ev.fase} - ${ev.luogo}"),
+                  const SizedBox(height: 4),
+                  Text("Data: $dataFormattata  •  Ore: ${ev.ora}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildListaGiorno(List<EventoLegale> impegni) {
+    if (impegni.isEmpty) {
+      return const Center(child: Text("Nessun impegno per questa data."));
+    }
+    return ListView.builder(
+      itemCount: impegni.length,
+      itemBuilder: (context, index) {
+        final ev = impegni[index];
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          // --- APPLICAZIONE COLORE ARCOBALENO ---
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: _getColoreFase(ev.fase), width: 6)),
+            ),
+            child: ListTile(
+              onTap: () => _mostraDettagliEvento(ev, index),
+              leading: Text(ev.ora, style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(ev.cliente),
+              subtitle: Text(ev.fase),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                onPressed: () => _confermaEliminaAttivita(impegni, index),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
-// --- CLASSE MODELLO ---
 class EventoLegale {
   String cliente, fase, ora, luogo;
   EventoLegale({required this.cliente, required this.fase, required this.ora, required this.luogo});
