@@ -240,6 +240,59 @@ class _AgendaPageState extends State<AgendaPage> {
     });
   }
 
+  // 1. Funzione per scegliere il mese dalla lista
+void _mostraSelettoreMese() {
+  showDialog(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text("Seleziona Mese"),
+      children: List.generate(12, (index) {
+        return SimpleDialogOption(
+          onPressed: () {
+            setState(() {
+              // Cambia solo il mese, mantiene l'anno attuale
+              _focusedDay = DateTime(_focusedDay.year, index + 1, 1);
+            });
+            Navigator.pop(context);
+          },
+          child: Text(_getMonthName(index + 1)),
+        );
+      }),
+    ),
+  );
+}
+
+// 2. Funzione per scegliere l'anno dalla lista
+void _mostraSelettoreAnno() {
+  showDialog(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text("Seleziona Anno"),
+      children: List.generate(11, (index) {
+        int anno = 2020 + index; 
+        return SimpleDialogOption(
+          onPressed: () {
+            setState(() {
+              // Cambia solo l'anno, mantiene il mese attuale
+              _focusedDay = DateTime(anno, _focusedDay.month, 1);
+            });
+            Navigator.pop(context);
+          },
+          child: Text("$anno"),
+        );
+      }),
+    ),
+  );
+}
+
+// 3. Helper per tradurre il numero del mese in testo
+String _getMonthName(int month) {
+  const mesi = [
+    "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+    "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
+  ];
+  return mesi[month - 1];
+}
   _caricaImpegni() async {
     String? data = await _storage.read(key: _storageKey);
     if (data != null) {
@@ -564,14 +617,47 @@ class _AgendaPageState extends State<AgendaPage> {
         ),
       ),
       body: Column(
-        children: [
-          if (!_staCercando) ...[
+  children: [
+    if (!_staCercando) ...[
+      // --- INIZIO HEADER PERSONALIZZATO PER JURISPLAN ---
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Bottone per il Mese
+            TextButton(
+              onPressed: () => _mostraSelettoreMese(),
+              child: Text(
+                _getMonthName(_focusedDay.month).toUpperCase(),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF072C55)),
+              ),
+            ),
+            const Text("/", style: TextStyle(fontSize: 18, color: Colors.grey)),
+            // Bottone per l'Anno
+            TextButton(
+              onPressed: () => _mostraSelettoreAnno(),
+              child: Text(
+                "${_focusedDay.year}",
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF072C55)),
+              ),
+            ),
+          ],
+        ),
+      ),
             TableCalendar(
+              headerVisible: false, // <--- Nascondiamo quella vecchia
               locale: 'it_IT',
               firstDay: DateTime(2020),
               lastDay: DateTime(2030),
-              focusedDay: _giornoSelezionato,
+              focusedDay: _focusedDay,
+              availableGestures: AvailableGestures.all,
               currentDay: DateTime.now(),
+              onPageChanged: (focusedDay) {
+    setState(() {
+      _focusedDay = focusedDay; // Questo aggiorna l'header mentre scorri
+    });
+  },
               selectedDayPredicate: (day) => isSameDay(_giornoSelezionato, day),
               onDaySelected: (selectedDay, focusedDay) {
                 setState(() {
